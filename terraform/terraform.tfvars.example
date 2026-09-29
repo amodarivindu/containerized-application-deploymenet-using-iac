@@ -1,20 +1,13 @@
 # Copy to terraform.tfvars for local runs. Jenkins sets these via TF_VAR_* env vars.
-aws_region   = "us-east-1"
-project_name = "ecs-demo"
-environment  = "dev"
-
-# Docker Hub image (<username>/<repo>). For a private repo, also set the secret ARN.
+aws_region           = "us-east-1"
 dockerhub_repository = "your-dockerhub-user/ecs-demo"
 image_tag            = "latest"
-# dockerhub_credentials_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:dockerhub-pull-AbCdEf"
 
-# Vertical scaling (valid Fargate combos: 256/512-2048, 512/1024-4096, 1024/2048-8192, ...)
+# Vertical scaling
 task_cpu    = 256
 task_memory = 512
 
 # Horizontal scaling
-desired_count          = 2
-enable_autoscaling     = true
-min_capacity           = 1
-max_capacity           = 4
-cpu_target_utilization = 60
+desired_count = 2
+min_capacity  = 1
+max_capacity  = 4

@@ -23,10 +23,40 @@ def test_info_contains_version_and_host(client):
     assert {"version", "environment", "hostname", "started"} <= body.keys()
 
 
-def test_index_renders_html(client):
+def test_index_renders_calculator(client):
     resp = client.get("/")
     assert resp.status_code == 200
-    assert b"Hello from AWS ECS Fargate" in resp.data
+    assert b"Calculator" in resp.data
+    assert b'data-action="equals"' in resp.data
+
+
+def test_calculate_returns_result(client):
+    resp = client.post("/api/calculate", json={"expression": "(2 + 3) × 4"})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["result"] == 20
+    assert body["expression"] == "(2 + 3) × 4"
+
+
+def test_calculate_division_by_zero_is_400(client):
+    resp = client.post("/api/calculate", json={"expression": "1 / 0"})
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "Division by zero"
+
+
+def test_calculate_rejects_code(client):
+    resp = client.post("/api/calculate", json={"expression": "__import__('os')"})
+    assert resp.status_code == 400
+    assert "Unsupported" in resp.get_json()["error"]
+
+
+def test_calculate_without_json_body_is_400(client):
+    resp = client.post("/api/calculate", data="not json")
+    assert resp.status_code == 400
+
+
+def test_calculate_requires_post(client):
+    assert client.get("/api/calculate").status_code == 405
 
 
 def test_unknown_route_is_404(client):

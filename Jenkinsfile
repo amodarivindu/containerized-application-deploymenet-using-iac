@@ -50,8 +50,6 @@ pipeline {
     TF_VAR_project_name  = "${PROJECT_NAME}"
     TF_VAR_environment   = "${DEPLOY_ENV}"
     TF_VAR_dockerhub_repository = "${DOCKERHUB_REPO}"
-    // Private Docker Hub repo only (see docs/SETUP.md):
-    // TF_VAR_dockerhub_credentials_secret_arn = 'arn:aws:secretsmanager:us-east-1:<account-id>:secret:dockerhub-pull-XXXXXX'
     TF_VAR_task_cpu      = "${params.TASK_CPU}"
     TF_VAR_task_memory   = "${params.TASK_MEMORY}"
     TF_VAR_desired_count = "${params.DESIRED_COUNT}"

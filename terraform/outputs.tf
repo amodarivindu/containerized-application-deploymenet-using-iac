@@ -1,11 +1,6 @@
 output "alb_url" {
-  description = "Public URL of the application."
+  description = "Open this in a browser"
   value       = "http://${aws_lb.main.dns_name}"
-}
-
-output "image" {
-  description = "Docker Hub image currently deployed."
-  value       = "docker.io/${var.dockerhub_repository}:${var.image_tag}"
 }
 
 output "ecs_cluster_name" {
@@ -16,24 +11,7 @@ output "ecs_service_name" {
   value = aws_ecs_service.app.name
 }
 
-output "task_definition_arn" {
-  value = aws_ecs_task_definition.app.arn
-}
-
 output "image_tag" {
-  description = "Currently deployed image tag (used by the Jenkins 'scale' action to keep the same image)."
+  description = "Currently deployed tag (the Jenkins 'scale' action reuses it)"
   value       = var.image_tag
-}
-
-output "task_size" {
-  description = "Current vertical scaling settings."
-  value = {
-    cpu              = var.task_cpu
-    memory           = var.task_memory
-    gunicorn_workers = local.gunicorn_workers
-  }
-}
-
-output "log_group" {
-  value = aws_cloudwatch_log_group.app.name
 }

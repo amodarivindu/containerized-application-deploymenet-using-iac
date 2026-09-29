@@ -1,43 +1,18 @@
-"""Sample web application deployed to AWS ECS Fargate."""
+"""Calculator web application deployed to AWS ECS Fargate."""
 
 import os
 import socket
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, render_template, request
+
+from calculator import CalculationError, evaluate
 
 app = Flask(__name__)
 
 APP_VERSION = os.getenv("APP_VERSION", "dev")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "local")
 STARTED_AT = datetime.now(timezone.utc).isoformat()
-
-PAGE = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>ECS Fargate Demo</title>
-  <style>
-    body {{ font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0;
-           display: grid; place-items: center; min-height: 100vh; margin: 0; }}
-    .card {{ background: #1e293b; padding: 2rem 3rem; border-radius: 12px; }}
-    h1 {{ margin-top: 0; color: #38bdf8; }}
-    dt {{ color: #94a3b8; font-size: .85rem; }}
-    dd {{ margin: 0 0 1rem; font-family: ui-monospace, monospace; }}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Hello from AWS ECS Fargate</h1>
-    <dl>
-      <dt>Version</dt><dd>{version}</dd>
-      <dt>Environment</dt><dd>{environment}</dd>
-      <dt>Served by task</dt><dd>{hostname}</dd>
-      <dt>Task started</dt><dd>{started}</dd>
-    </dl>
-  </div>
-</body>
-</html>"""
 
 
 def _info() -> dict:
@@ -51,7 +26,18 @@ def _info() -> dict:
 
 @app.get("/")
 def index():
-    return PAGE.format(**_info())
+    return render_template("index.html", **_info())
+
+
+@app.post("/api/calculate")
+def calculate():
+    payload = request.get_json(silent=True) or {}
+    expression = payload.get("expression")
+    try:
+        result = evaluate(expression)
+    except CalculationError as exc:
+        return jsonify(expression=expression, error=str(exc)), 400
+    return jsonify(expression=expression, result=result, hostname=socket.gethostname())
 
 
 @app.get("/api/info")

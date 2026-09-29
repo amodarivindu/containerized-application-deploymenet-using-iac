@@ -31,20 +31,7 @@ GitHub only hosts the code. All CI/CD (tests, builds, Terraform, deployment) run
 1. Sign in at https://hub.docker.com.
 2. *Account settings → Personal access tokens → Generate new token*, access **Read & Write**. Copy the token.
 3. Set `DOCKERHUB_REPO` in the `Jenkinsfile` to `<your-dockerhub-username>/ecs-demo` (lowercase).
-   The repository is created automatically on the first push, as **public**.
-
-### Optional: private repository
-
-ECS can only pull a private image with credentials stored in AWS Secrets Manager:
-
-```bash
-aws secretsmanager create-secret --name dockerhub-pull \
-  --secret-string '{"username":"<dockerhub-user>","password":"<access-token>"}'
-```
-
-Copy the returned `ARN` and uncomment `TF_VAR_dockerhub_credentials_secret_arn` in the `Jenkinsfile`.
-Terraform then adds `repositoryCredentials` to the container definition and lets the task execution role read that secret.
-This also lifts Docker Hub's anonymous pull rate limit, so it's worth doing even for a public repo in busy accounts.
+   The repository is created automatically on the first push, as **public**. Keep it public: ECS pulls the image without logging in.
 
 ## 4. Create an IAM user for Jenkins
 
@@ -60,7 +47,7 @@ This also lifts Docker Hub's anonymous pull rate limit, so it's worth doing even
 ```bash
 cd terraform/bootstrap
 terraform init
-terraform apply -var="state_bucket_name=<globally-unique-bucket-name>"
+terraform apply -var="bucket_name=<globally-unique-bucket-name>"
 ```
 
 Then put that bucket name in:
@@ -128,7 +115,7 @@ The first apply takes ~5 minutes (mostly ALB provisioning).
 ### Vertical (task size)
 
 Run `ACTION=scale` (or `deploy`) with new `TASK_CPU` / `TASK_MEMORY`, e.g. `1024` / `2048`.
-Terraform registers a new task definition revision and ECS does a rolling replacement (min healthy 100%, max 200%) — no downtime. Gunicorn workers scale with the vCPU count (`WEB_CONCURRENCY = 2 × vCPU + 1`).
+Terraform registers a new task definition revision and ECS does a rolling replacement (min healthy 100%, max 200%) — no downtime.
 
 Valid Fargate combinations:
 
@@ -140,11 +127,11 @@ Valid Fargate combinations:
 | 2048 | 4096 – 16384 |
 | 4096 | 8192 – 30720 |
 
-Invalid combinations are rejected at plan time by a Terraform precondition.
+Any other combination is rejected by AWS during `terraform apply` (the error names the invalid CPU/memory values).
 
 ### Horizontal (task count)
 
-- **Automatic**: target tracking keeps average CPU near 60% and memory near 75%, within `MIN_TASKS`–`MAX_TASKS`.
+- **Automatic**: target tracking keeps average CPU near 60%, within `MIN_TASKS`–`MAX_TASKS`.
 - **Manual**: `ACTION=scale` with `DESIRED_COUNT` calls `scripts/scale-service.sh` (`aws ecs update-service --desired-count`). Keep it within the min/max range or autoscaling will pull it back.
 
 ## 9. Running locally
@@ -164,7 +151,7 @@ terraform plan
 
 Run the pipeline with `ACTION=destroy` and approve. This removes everything in AWS except the state bucket.
 Images stay on Docker Hub; delete the repository there if you no longer need it.
-To remove the state bucket too, empty it, set `prevent_destroy = false` in `terraform/bootstrap/main.tf`, then run `terraform destroy` there.
+To remove the state bucket too, empty it (including old versions), then run `terraform destroy -var="bucket_name=<name>"` in `terraform/bootstrap`.
 
 ## 11. Cost notes
 
@@ -182,11 +169,10 @@ Destroy the stack when you're not using it.
 | Symptom | Likely cause / fix |
 |---------|-------------------|
 | `permission denied ... docker.sock` in Jenkins | Wrong group for the socket. On Linux: `DOCKER_GID=$(stat -c '%g' /var/run/docker.sock) docker compose up -d` |
-| Tasks stuck in `PENDING`, `CannotPullContainerError` | Image tag missing on Docker Hub, repo is private without `dockerhub_credentials_secret_arn`, or tasks have no internet route (check `assign_public_ip` / subnet routes). |
-| `toomanyrequests: You have reached your pull rate limit` | Anonymous Docker Hub pull limit. Add the pull-credentials secret (step 3, private repository). |
+| Tasks stuck in `PENDING`, `CannotPullContainerError` | Image tag missing on Docker Hub, repo is private (it must be public), or tasks have no internet route (check `assign_public_ip` / subnet routes). |
+| `toomanyrequests: You have reached your pull rate limit` | Docker Hub's anonymous pull limit. Wait and retry; ECS keeps trying to start the tasks. |
 | Push fails: `denied: requested access to the resource is denied` | `DOCKERHUB_REPO` username doesn't match the `dockerhub` credential, or the token is read-only. |
-| `dockerhub_repository must look like <username>/<repo>` | Set `DOCKERHUB_REPO` in the Jenkinsfile (lowercase, no `CHANGE-ME`). |
 | Deployment rolled back automatically | Circuit breaker fired: new tasks failed health checks. Check CloudWatch log group `/ecs/ecs-demo-dev`. |
 | `Error acquiring the state lock` | A previous run died mid-apply. Confirm no run is active, then `terraform force-unlock <LOCK_ID>`. |
-| `task_memory ... is not valid for task_cpu` | Pick a combination from the table above. |
+| `Invalid 'cpu' setting for task` / invalid memory on apply | Pick a CPU/memory combination from the table above. |
 | Scale stage: `output ... image_tag not found` | Nothing deployed yet — run `deploy` first. |

@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calculator · ECS Fargate</title>
+  <style>
+    :root {
+      --bg: #0f172a; --panel: #1e293b; --key: #334155; --key-hover: #475569;
+      --op: #0369a1; --op-hover: #0284c7; --eq: #16a34a; --eq-hover: #22c55e;
+      --text: #e2e8f0; --muted: #94a3b8; --error: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; padding: 16px;
+    }
+    .wrap { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; align-items: flex-start; }
+    .calc { background: var(--panel); border-radius: 16px; padding: 20px; width: 320px; max-width: 100%; }
+    h1 { margin: 0 0 12px; font-size: 1.1rem; color: #38bdf8; }
+    .display {
+      background: #0b1220; border-radius: 10px; padding: 12px 14px; margin-bottom: 16px;
+      text-align: right; min-height: 88px; overflow-wrap: anywhere;
+    }
+    .expr { color: var(--muted); min-height: 1.3em; font-family: ui-monospace, monospace; }
+    .result { font-size: 2rem; font-weight: 600; font-family: ui-monospace, monospace; }
+    .result.error { color: var(--error); font-size: 1rem; font-weight: 400; padding-top: .6rem; }
+    .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    button {
+      border: 0; border-radius: 10px; padding: 16px 0; font-size: 1.15rem; cursor: pointer;
+      background: var(--key); color: var(--text);
+    }
+    button:hover { background: var(--key-hover); }
+    button:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
+    button.op { background: var(--op); }
+    button.op:hover { background: var(--op-hover); }
+    button.eq { background: var(--eq); }
+    button.eq:hover { background: var(--eq-hover); }
+    button.fn { color: #fbbf24; }
+    .history { background: var(--panel); border-radius: 16px; padding: 20px; width: 280px; max-width: 100%; }
+    .history h2 { margin: 0 0 12px; font-size: 1rem; color: var(--muted); }
+    .history ol { list-style: none; margin: 0; padding: 0; font-family: ui-monospace, monospace; font-size: .9rem; }
+    .history li { padding: 8px 0; border-bottom: 1px solid #334155; cursor: pointer; overflow-wrap: anywhere; }
+    .history li:hover { color: #38bdf8; }
+    .history .empty { color: var(--muted); cursor: default; }
+    footer { margin-top: 16px; color: var(--muted); font-size: .75rem; line-height: 1.5; }
+    footer code { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <main class="calc">
+      <h1>Calculator</h1>
+      <div class="display" aria-live="polite">
+        <div class="expr" id="expr"></div>
+        <div class="result" id="result">0</div>
+      </div>
+      <div class="keys">
+        <button class="fn" data-action="clear">C</button>
+        <button class="fn" data-value="(">(</button>
+        <button class="fn" data-value=")">)</button>
+        <button class="op" data-value="÷">÷</button>
+
+        <button data-value="7">7</button>
+        <button data-value="8">8</button>
+        <button data-value="9">9</button>
+        <button class="op" data-value="×">×</button>
+
+        <button data-value="4">4</button>
+        <button data-value="5">5</button>
+        <button data-value="6">6</button>
+        <button class="op" data-value="−">−</button>
+
+        <button data-value="1">1</button>
+        <button data-value="2">2</button>
+        <button data-value="3">3</button>
+        <button class="op" data-value="+">+</button>
+
+        <button data-value="0">0</button>
+        <button data-value=".">.</button>
+        <button class="op" data-value="%" title="Modulo">%</button>
+        <button class="op" data-value="^" title="Power">xʸ</button>
+
+        <button class="fn" data-action="back" title="Backspace">⌫</button>
+        <button class="eq" data-action="equals" style="grid-column: span 3">=</button>
+      </div>
+      <footer>
+        Version <code>{{ version }}</code> · {{ environment }}<br>
+        Served by task <code>{{ hostname }}</code>
+      </footer>
+    </main>
+
+    <aside class="history">
+      <h2>History</h2>
+      <ol id="history"><li class="empty">No calculations yet</li></ol>
+    </aside>
+  </div>
+
+  <script>
+    const exprEl = document.getElementById("expr");
+    const resultEl = document.getElementById("result");
+    const historyEl = document.getElementById("history");
+    let expression = "";
+    let justEvaluated = false;
+
+    function render() {
+      resultEl.classList.remove("error");
+      resultEl.textContent = expression || "0";
+    }
+
+    function input(value) {
+      // After "=", typing a digit starts fresh; typing an operator continues from the result.
+      if (justEvaluated && /[0-9.(]/.test(value)) expression = "";
+      justEvaluated = false;
+      exprEl.textContent = "";
+      expression += value;
+      render();
+    }
+
+    async function calculate() {
+      if (!expression) return;
+      try {
+        const resp = await fetch("/api/calculate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ expression }),
+        });
+        const data = await resp.json();
+        exprEl.textContent = expression + " =";
+        if (!resp.ok) {
+          resultEl.textContent = data.error;
+          resultEl.classList.add("error");
+          return;
+        }
+        addHistory(expression, data.result);
+        expression = String(data.result);
+        resultEl.textContent = expression;
+        justEvaluated = true;
+      } catch (err) {
+        resultEl.textContent = "Cannot reach the server";
+        resultEl.classList.add("error");
+      }
+    }
+
+    function addHistory(expr, result) {
+      historyEl.querySelector(".empty")?.remove();
+      const li = document.createElement("li");
+      li.textContent = `${expr} = ${result}`;
+      li.title = "Use this result";
+      li.addEventListener("click", () => { expression = String(result); justEvaluated = true; exprEl.textContent = ""; render(); });
+      historyEl.prepend(li);
+      while (historyEl.children.length > 10) historyEl.lastChild.remove();
+    }
+
+    document.querySelector(".keys").addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      const action = btn.dataset.action;
+      if (action === "clear") { expression = ""; exprEl.textContent = ""; justEvaluated = false; render(); }
+      else if (action === "back") { expression = expression.slice(0, -1); justEvaluated = false; render(); }
+      else if (action === "equals") calculate();
+      else input(btn.dataset.value);
+    });
+
+    const keyMap = { "*": "×", "/": "÷", "-": "−" };
+    document.addEventListener("keydown", (e) => {
+      if (/^[0-9.+%^()]$/.test(e.key)) input(e.key);
+      else if (keyMap[e.key]) input(keyMap[e.key]);
+      else if (e.key === "Enter" || e.key === "=") { e.preventDefault(); calculate(); }
+      else if (e.key === "Backspace") { expression = expression.slice(0, -1); render(); }
+      else if (e.key === "Escape") { expression = ""; exprEl.textContent = ""; render(); }
+    });
+  </script>
+</body>
+</html>

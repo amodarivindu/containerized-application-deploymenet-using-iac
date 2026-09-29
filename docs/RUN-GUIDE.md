@@ -8,7 +8,7 @@ Run all commands in **PowerShell** from the project folder unless a step says ot
 cd "D:\my\Projects\containerized application deploymenet using iac"
 ```
 
-> Reference details (IAM, private Docker Hub repos, scaling tables, cost, troubleshooting) are in [docs/SETUP.md](docs/SETUP.md).
+> Reference details (IAM, scaling tables, cost, troubleshooting) are in [docs/SETUP.md](SETUP.md).
 
 ---
 
@@ -64,7 +64,18 @@ docker build --target test -t ecs-demo:test app
 docker compose up --build
 ```
 
-Open **http://localhost:8080**. You should see *Hello from AWS ECS Fargate*.
+Open **http://localhost:8080**. You should see the **Calculator**. Try `(2 + 3) × 4`, then `=`. The keyboard works too: digits, `+ - * / % ^ ( )`, Enter, Backspace, Esc.
+
+Test the API directly from PowerShell:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/calculate `
+  -ContentType "application/json" -Body '{"expression": "(2 + 3) * 4 ^ 2"}'
+# expression       hostname      result
+# ----------       --------      ------
+# (2 + 3) * 4 ^ 2  3f1c...           80
+```
+
 Other endpoints: http://localhost:8080/health and http://localhost:8080/api/info
 
 Stop it with `Ctrl+C`, then `docker compose down`.
@@ -78,7 +89,7 @@ Stop it with `Ctrl+C`, then `docker compose down`.
    - Description: `jenkins`
    - Access permissions: **Read & Write**
    - Copy the token now. It is shown only once, and you will need it in Step 7.
-3. Open [Jenkinsfile](Jenkinsfile) and set your repository (lowercase):
+3. Open [Jenkinsfile](../Jenkinsfile) and set your repository (lowercase):
 
    ```groovy
    DOCKERHUB_REPO     = 'your-dockerhub-username/ecs-demo'
@@ -95,7 +106,7 @@ docker push your-dockerhub-username/ecs-demo:manual-test
 docker logout
 ```
 
-> **Private repository?** ECS then needs pull credentials stored in AWS Secrets Manager. Do Step 3 first, then follow *Prepare Docker Hub → Optional: private repository* in [docs/SETUP.md](docs/SETUP.md).
+> Keep the repository **public**. ECS pulls the image without logging in to Docker Hub.
 
 ---
 
@@ -124,15 +135,15 @@ The bucket name must be globally unique. A safe pattern is `ecs-demo-tfstate-<ac
 ```powershell
 cd terraform\bootstrap
 terraform init
-terraform apply -var="state_bucket_name=ecs-demo-tfstate-123456789012"
+terraform apply -var="bucket_name=ecs-demo-tfstate-123456789012"
 # type: yes
 cd ..\..
 ```
 
 Now replace `CHANGE-ME-ecs-demo-tfstate` with your bucket name in:
 
-- [Jenkinsfile](Jenkinsfile) → the `TF_STATE_BUCKET` line
-- [docs/jenkins-iam-policy.json](docs/jenkins-iam-policy.json) → both `Resource` lines under `TerraformState`
+- [Jenkinsfile](../Jenkinsfile) → the `TF_STATE_BUCKET` line
+- [docs/jenkins-iam-policy.json](jenkins-iam-policy.json) → both `Resource` lines under `TerraformState`
 
 ---
 
@@ -259,7 +270,7 @@ All scaling runs through **Build with Parameters**.
 |------|-----------|-----------------|
 | **Vertical** (bigger tasks) | `ACTION=scale`, `TASK_CPU=512`, `TASK_MEMORY=1024` | New task definition revision; tasks are replaced one by one with no downtime |
 | **Horizontal** (more tasks) | `ACTION=scale`, `DESIRED_COUNT=3`, `MAX_TASKS=5` | Service grows to 3 running tasks |
-| **New release** | Edit the heading in `app/src/app.py`, commit, push, then `ACTION=deploy` | New tag on Docker Hub, new version on the page |
+| **New release** | Change the `<h1>Calculator</h1>` title in `app/src/templates/index.html`, commit, push, then `ACTION=deploy` | New tag on Docker Hub, new version on the page |
 | **Dry run** | `ACTION=plan-only` | Tests and plan only, no changes |
 
 Valid CPU / memory pairs:
@@ -292,7 +303,7 @@ The stack costs roughly **$1 per day** while running.
 
 3. *(Optional)* Delete the image repository on Docker Hub: **Repositories → ecs-demo → Settings → Delete repository**.
 
-The S3 state bucket is kept (it costs almost nothing). To delete it too, empty the bucket, set `prevent_destroy = false` in `terraform/bootstrap/main.tf`, then run `terraform destroy` in `terraform/bootstrap`.
+The S3 state bucket is kept (it costs almost nothing). To delete it too, empty the bucket (including old versions), then run `terraform destroy -var="bucket_name=<name>"` in `terraform\bootstrap`.
 
 ---
 
@@ -305,12 +316,11 @@ The S3 state bucket is kept (it costs almost nothing). To delete it too, empty t
 | Jenkins: `permission denied ... docker.sock` | Restart Jenkins: `cd jenkins; docker compose down; docker compose up -d`. On Linux hosts, set `DOCKER_GID` (see docs/SETUP.md). |
 | Jenkins: `Could not find credentials entry with ID 'aws-deployer'` or `'dockerhub'` | The IDs must match exactly. `aws-deployer` must be of kind **AWS Credentials**, and `dockerhub` of kind **Username with password**. |
 | Push: `denied: requested access to the resource is denied` | The username in `DOCKERHUB_REPO` doesn't match the `dockerhub` credential, or the token is not **Read & Write**. |
-| `dockerhub_repository must look like <username>/<repo>` | `DOCKERHUB_REPO` still says `CHANGE-ME` or has uppercase letters. |
-| Tasks stuck, `CannotPullContainerError` | The tag isn't on Docker Hub, or the repo is private without pull credentials (see docs/SETUP.md). |
-| `toomanyrequests: ... pull rate limit` | Docker Hub anonymous limit. Add pull credentials as in docs/SETUP.md, even for a public repo. |
+| Tasks stuck, `CannotPullContainerError` | The tag isn't on Docker Hub, or the repo is private (it must be public). |
+| `toomanyrequests: ... pull rate limit` | Docker Hub anonymous pull limit. Wait and retry; ECS keeps trying. |
 | `terraform fmt -check` fails in Jenkins | Run `terraform fmt -recursive` in the `terraform` folder, then commit and push. |
 | `NoSuchBucket` / `AccessDenied` on init | `TF_STATE_BUCKET` in the Jenkinsfile doesn't match your bucket, or the IAM policy still has `CHANGE-ME`. |
-| `task_memory ... is not valid for task_cpu` | Use a pair from the table in Step 9. |
+| Apply fails with an invalid CPU / memory error | Use a pair from the table in Step 9. |
 | Deployment rolled back automatically | New tasks failed health checks. Check logs in CloudWatch `/ecs/ecs-demo-dev`. |
 | `Error acquiring the state lock` | A previous run stopped mid-apply. Make sure nothing is running, then `terraform force-unlock <LOCK_ID>`. |
 | Scale fails with `output "image_tag" not found` | Nothing is deployed yet. Run `ACTION=deploy` first. |

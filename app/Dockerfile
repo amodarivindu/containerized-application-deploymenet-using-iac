@@ -33,7 +33,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=3)" || exit 1
 
-# gunicorn binds to 0.0.0.0:$PORT and reads worker count from $WEB_CONCURRENCY,
-# which the ECS task definition sets based on the task's vCPU allocation.
+# gunicorn binds to 0.0.0.0:$PORT and reads the worker count from $WEB_CONCURRENCY.
 CMD ["gunicorn", "--chdir", "src", "--threads", "4", "--worker-tmp-dir", "/dev/shm", \
      "--access-logfile", "-", "app:app"]

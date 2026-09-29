@@ -1,32 +1,34 @@
-# VPC with public subnets across AZs.
-# Fargate tasks run in public subnets with public IPs so they can pull from Docker Hub
-# without a NAT gateway (keeps demo cost low). Inbound traffic is still limited
-# to the ALB by the task security group. For production, move tasks to private
-# subnets behind a NAT gateway or VPC endpoints.
+# VPC with two public subnets in two AZs.
+# Tasks get public IPs so they can pull the image from Docker Hub (no NAT gateway needed).
+# They are still protected: the task security group only accepts traffic from the ALB.
 
 resource "aws_vpc" "main" {
-  cidr_block           = var.vpc_cidr
-  enable_dns_support   = true
+  cidr_block           = "10.20.0.0/16"
   enable_dns_hostnames = true
-
-  tags = { Name = "${local.name}-vpc" }
+  tags                 = { Name = "${local.name}-vpc" }
 }
 
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
-  tags   = { Name = "${local.name}-igw" }
 }
 
-resource "aws_subnet" "public" {
-  count                   = length(local.azs)
+resource "aws_subnet" "public_a" {
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index)
-  availability_zone       = local.azs[count.index]
+  cidr_block              = "10.20.1.0/24"
+  availability_zone       = var.availability_zones[0]
   map_public_ip_on_launch = true
-
-  tags = { Name = "${local.name}-public-${local.azs[count.index]}" }
+  tags                    = { Name = "${local.name}-public-a" }
 }
 
+resource "aws_subnet" "public_b" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.20.2.0/24"
+  availability_zone       = var.availability_zones[1]
+  map_public_ip_on_launch = true
+  tags                    = { Name = "${local.name}-public-b" }
+}
+
+# Send internet-bound traffic to the internet gateway.
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -34,24 +36,26 @@ resource "aws_route_table" "public" {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.main.id
   }
-
-  tags = { Name = "${local.name}-public-rt" }
 }
 
-resource "aws_route_table_association" "public" {
-  count          = length(aws_subnet.public)
-  subnet_id      = aws_subnet.public[count.index].id
+resource "aws_route_table_association" "public_a" {
+  subnet_id      = aws_subnet.public_a.id
   route_table_id = aws_route_table.public.id
 }
 
-# ---------- Security groups ----------
+resource "aws_route_table_association" "public_b" {
+  subnet_id      = aws_subnet.public_b.id
+  route_table_id = aws_route_table.public.id
+}
+
+# ---------- Security groups (firewalls) ----------
+
+# Load balancer: open to the internet on port 80.
 resource "aws_security_group" "alb" {
-  name        = "${local.name}-alb-sg"
-  description = "Allow HTTP from the internet to the ALB"
-  vpc_id      = aws_vpc.main.id
+  name   = "${local.name}-alb-sg"
+  vpc_id = aws_vpc.main.id
 
   ingress {
-    description = "HTTP"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
@@ -66,13 +70,12 @@ resource "aws_security_group" "alb" {
   }
 }
 
-resource "aws_security_group" "ecs_tasks" {
-  name        = "${local.name}-tasks-sg"
-  description = "Allow traffic only from the ALB to the ECS tasks"
-  vpc_id      = aws_vpc.main.id
+# Tasks: accept the app port ONLY from the load balancer's security group.
+resource "aws_security_group" "tasks" {
+  name   = "${local.name}-tasks-sg"
+  vpc_id = aws_vpc.main.id
 
   ingress {
-    description     = "App port from ALB"
     from_port       = var.container_port
     to_port         = var.container_port
     protocol        = "tcp"
@@ -80,7 +83,6 @@ resource "aws_security_group" "ecs_tasks" {
   }
 
   egress {
-    description = "Outbound for Docker Hub pulls, CloudWatch Logs, etc."
     from_port   = 0
     to_port     = 0
     protocol    = "-1"

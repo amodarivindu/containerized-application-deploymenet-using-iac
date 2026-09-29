@@ -1,11 +1,10 @@
-# One-time bootstrap: creates the S3 bucket that stores Terraform remote state
-# for the main stack. Run locally once with local state:
+# Run ONCE to create the S3 bucket that stores Terraform state for the main stack:
 #   cd terraform/bootstrap
 #   terraform init
-#   terraform apply -var="state_bucket_name=<globally-unique-name>"
+#   terraform apply -var="bucket_name=<globally-unique-name>"
+# (New S3 buckets are encrypted and block public access by default.)
 
 terraform {
-  required_version = ">= 1.10.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -14,52 +13,22 @@ terraform {
   }
 }
 
-variable "aws_region" {
-  type    = string
-  default = "us-east-1"
-}
-
-variable "state_bucket_name" {
-  description = "Globally unique S3 bucket name for Terraform state."
-  type        = string
-}
-
 provider "aws" {
-  region = var.aws_region
+  region = "us-east-1"
+}
+
+variable "bucket_name" {
+  type = string
 }
 
 resource "aws_s3_bucket" "tfstate" {
-  bucket = var.state_bucket_name
-
-  lifecycle {
-    prevent_destroy = true
-  }
+  bucket = var.bucket_name
 }
 
+# Keep old versions of the state file so a bad apply can be recovered.
 resource "aws_s3_bucket_versioning" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
   versioning_configuration {
     status = "Enabled"
   }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "tfstate" {
-  bucket = aws_s3_bucket.tfstate.id
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "tfstate" {
-  bucket                  = aws_s3_bucket.tfstate.id
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-output "state_bucket_name" {
-  value = aws_s3_bucket.tfstate.bucket
 }
