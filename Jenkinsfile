@@ -43,6 +43,10 @@ pipeline {
     TF_STATE_BUCKET    = 'ecs-demo-tfstate-400493233228'   // bucket created by terraform/bootstrap
     TF_IN_AUTOMATION   = 'true'
     TF_INPUT           = '0'
+    TF_CLI_ARGS_init     = "-no-color"   // no ANSI colour codes in the Jenkins log
+    TF_CLI_ARGS_validate = "-no-color"
+    TF_CLI_ARGS_plan     = "-no-color"
+    TF_CLI_ARGS_apply    = "-no-color"
 
     // Terraform input variables (picked up automatically as TF_VAR_<name>)
     TF_VAR_aws_region    = "${AWS_REGION}"
@@ -113,8 +117,8 @@ pipeline {
             echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USER" --password-stdin
             docker tag "$PROJECT_NAME:$IMAGE_TAG" "$DOCKERHUB_REPO:$IMAGE_TAG"
             docker tag "$PROJECT_NAME:$IMAGE_TAG" "$DOCKERHUB_REPO:latest"
-            docker push "$DOCKERHUB_REPO:$IMAGE_TAG"
-            docker push "$DOCKERHUB_REPO:latest"
+            docker push --quiet "$DOCKERHUB_REPO:$IMAGE_TAG"
+            docker push --quiet "$DOCKERHUB_REPO:latest"
           '''
         }
       }

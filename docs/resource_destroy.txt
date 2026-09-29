@@ -1,0 +1,137 @@
+The root cause was that your Terraform configuration uses a **remote S3 backend** for storing state.
+
+When you ran:
+
+```powershell
+terraform destroy
+```
+
+Terraform first tried to locate the state file. But on your local machine, Terraform had never been initialized for that backend, so it didn't know:
+
+* Which S3 bucket contains the state
+* Which AWS region to use
+* Where the `.tfstate` file is stored
+
+That's why you got:
+
+```text
+Backend initialization required, please run "terraform init"
+```
+
+### What `terraform init` actually does
+
+When you run:
+
+```powershell
+terraform init
+```
+
+Terraform:
+
+1. Downloads required providers (AWS provider, etc.)
+2. Configures the backend
+3. Connects to the remote state location
+4. Downloads metadata about the state
+
+In your case:
+
+```text
+S3 Bucket: ecs-demo-tfstate-400493233228
+Region: us-east-1
+```
+
+### Why Jenkins didn't have this problem
+
+Your Jenkins pipeline already executed:
+
+```bash
+terraform init
+```
+
+before:
+
+```bash
+terraform plan
+terraform apply
+```
+
+So Jenkins knew exactly where the remote state was stored.
+
+When you cloned the repository onto your laptop and immediately ran:
+
+```powershell
+terraform destroy
+```
+
+there was no local `.terraform` backend configuration yet.
+
+### Why Terraform asked for the bucket
+
+Your backend block is likely configured without hardcoded values, for example:
+
+```hcl
+terraform {
+  backend "s3" {}
+}
+```
+
+or uses external backend configuration.
+
+Therefore Terraform prompted:
+
+```text
+bucket
+The name of the S3 bucket
+Enter a value:
+```
+
+because it needed that information before it could connect to the state.
+
+### Why `destroy` depends on the state file
+
+Terraform does **not** discover resources by scanning AWS.
+
+Instead, it reads the state file to know:
+
+```text
+ECS Cluster
+ECS Service
+ALB
+Target Group
+Security Groups
+IAM Roles
+CloudWatch Logs
+...
+```
+
+and then destroys exactly those resources.
+
+Without the state file, Terraform has no reliable way to know what it created.
+
+### In summary
+
+The sequence was:
+
+```text
+terraform destroy
+        ↓
+No backend initialized
+        ↓
+Terraform doesn't know where the state is
+        ↓
+Run terraform init
+        ↓
+Provide S3 backend details
+        ↓
+Terraform connects to remote state
+        ↓
+terraform destroy can now determine what to remove
+```
+
+A useful command before any `plan`, `apply`, or `destroy` on a fresh machine is:
+
+```powershell
+terraform init -reconfigure
+```
+
+especially when using an S3 backend. It ensures Terraform reconnects to the correct remote state before performing any operations.
