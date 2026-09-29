@@ -1,0 +1,25 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+tfplan.txt
+crash.log
+terraform.tfvars
+backend.hcl
+override.tf
+override.tf.json
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Misc
+.env
+.DS_Store
+.idea/
+.vscode/

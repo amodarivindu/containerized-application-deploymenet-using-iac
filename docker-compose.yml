@@ -1,0 +1,12 @@
+# Local development: `docker compose up --build` then open http://localhost:8080
+services:
+  app:
+    build:
+      context: ./app
+      target: runtime
+      args:
+        APP_VERSION: local
+    environment:
+      ENVIRONMENT: local
+    ports:
+      - "8080:8080"

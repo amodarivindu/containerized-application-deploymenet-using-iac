@@ -1,0 +1,6 @@
+# Keep LF endings for files executed on Linux (Jenkins agents, containers).
+* text=auto
+*.sh text eol=lf
+Jenkinsfile text eol=lf
+Dockerfile text eol=lf
+*.tf text eol=lf

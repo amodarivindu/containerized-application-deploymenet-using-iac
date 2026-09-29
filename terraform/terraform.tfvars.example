@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars for local runs. Jenkins sets these via TF_VAR_* env vars.
+aws_region   = "us-east-1"
+project_name = "ecs-demo"
+environment  = "dev"
+
+# Vertical scaling (valid Fargate combos: 256/512-2048, 512/1024-4096, 1024/2048-8192, ...)
+task_cpu    = 256
+task_memory = 512
+
+# Horizontal scaling
+desired_count          = 2
+enable_autoscaling     = true
+min_capacity           = 1
+max_capacity           = 4
+cpu_target_utilization = 60
