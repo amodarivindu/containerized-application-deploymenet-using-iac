@@ -1,5 +1,5 @@
 # VPC with public subnets across AZs.
-# Fargate tasks run in public subnets with public IPs so they can pull from ECR
+# Fargate tasks run in public subnets with public IPs so they can pull from Docker Hub
 # without a NAT gateway (keeps demo cost low). Inbound traffic is still limited
 # to the ALB by the task security group. For production, move tasks to private
 # subnets behind a NAT gateway or VPC endpoints.
@@ -80,7 +80,7 @@ resource "aws_security_group" "ecs_tasks" {
   }
 
   egress {
-    description = "Outbound for ECR pulls, CloudWatch Logs, etc."
+    description = "Outbound for Docker Hub pulls, CloudWatch Logs, etc."
     from_port   = 0
     to_port     = 0
     protocol    = "-1"

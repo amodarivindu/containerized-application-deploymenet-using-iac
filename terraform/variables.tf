@@ -37,10 +37,31 @@ variable "container_port" {
   default     = 8080
 }
 
+variable "dockerhub_repository" {
+  description = "Docker Hub repository in the form <username>/<repo>, e.g. johndoe/ecs-demo."
+  type        = string
+  default     = "CHANGE-ME/ecs-demo"
+
+  validation {
+    condition     = can(regex("^[a-z0-9._-]+/[a-z0-9._-]+$", var.dockerhub_repository))
+    error_message = "dockerhub_repository must look like <username>/<repo> (lowercase)."
+  }
+}
+
 variable "image_tag" {
-  description = "Image tag in ECR to deploy. Jenkins sets this to <git-sha>-<build-number>."
+  description = "Image tag on Docker Hub to deploy. Jenkins sets this to <git-sha>-<build-number>."
   type        = string
   default     = "latest"
+}
+
+variable "dockerhub_credentials_secret_arn" {
+  description = <<-EOT
+    Optional. ARN of a Secrets Manager secret holding {"username":"...","password":"<access-token>"}.
+    Required only if the Docker Hub repository is private; also avoids anonymous pull rate limits.
+    Leave empty for a public repository.
+  EOT
+  type        = string
+  default     = ""
 }
 
 # ---------- Vertical scaling (task size) ----------

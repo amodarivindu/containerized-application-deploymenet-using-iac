@@ -19,7 +19,7 @@ COPY src/ ./src/
 COPY tests/ ./tests/
 RUN python -m pytest -q tests
 
-# ---------- runtime: the image pushed to ECR ----------
+# ---------- runtime: the image pushed to Docker Hub ----------
 FROM base AS runtime
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION} \

@@ -3,6 +3,11 @@ aws_region   = "us-east-1"
 project_name = "ecs-demo"
 environment  = "dev"
 
+# Docker Hub image (<username>/<repo>). For a private repo, also set the secret ARN.
+dockerhub_repository = "your-dockerhub-user/ecs-demo"
+image_tag            = "latest"
+# dockerhub_credentials_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:dockerhub-pull-AbCdEf"
+
 # Vertical scaling (valid Fargate combos: 256/512-2048, 512/1024-4096, 1024/2048-8192, ...)
 task_cpu    = 256
 task_memory = 512

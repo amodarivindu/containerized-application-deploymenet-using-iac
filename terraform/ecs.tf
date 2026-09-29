@@ -39,10 +39,10 @@ resource "aws_ecs_task_definition" "app" {
     cpu_architecture        = "X86_64"
   }
 
-  container_definitions = jsonencode([
+  container_definitions = jsonencode([merge(
     {
       name      = local.container_name
-      image     = "${aws_ecr_repository.app.repository_url}:${var.image_tag}"
+      image     = "docker.io/${var.dockerhub_repository}:${var.image_tag}"
       essential = true
 
       portMappings = [{
@@ -67,14 +67,19 @@ resource "aws_ecs_task_definition" "app" {
 
       logConfiguration = {
         logDriver = "awslogs"
-        options   = {
+        options = {
           awslogs-group         = aws_cloudwatch_log_group.app.name
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "app"
         }
       }
+    },
+    # Private Docker Hub repo: authenticate the pull with credentials from Secrets Manager.
+    {
+      for k, v in { repositoryCredentials = { credentialsParameter = var.dockerhub_credentials_secret_arn } } :
+      k => v if var.dockerhub_credentials_secret_arn != ""
     }
-  ])
+  )])
 
   lifecycle {
     precondition {

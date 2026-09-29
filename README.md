@@ -12,14 +12,14 @@ flowchart LR
     subgraph jenkins[Jenkins pipeline]
         direction TB
         t[Unit tests<br/>docker build --target test] --> b[Build image]
-        b --> p[Push to ECR]
+        b --> p[Push to Docker Hub]
         p --> plan[terraform plan]
         plan --> ok{Approval}
         ok --> apply[terraform apply]
         apply --> v[Verify: services-stable<br/>+ smoke test]
     end
 
-    p --> ecr[(Amazon ECR)]
+    p --> hub[(Docker Hub<br/>user/ecs-demo)]
     apply --> state[(S3 remote state<br/>+ lockfile)]
 
     subgraph aws[AWS VPC · 2 AZs]
@@ -33,7 +33,7 @@ flowchart LR
     end
 
     apply --> aws
-    ecr -.image pull.-> t1 & t2
+    hub -.image pull.-> t1 & t2
     t1 & t2 -.logs.-> cw[CloudWatch Logs<br/>Container Insights]
     user[End user] --> alb
 ```
@@ -53,8 +53,7 @@ flowchart LR
 │   ├── locals.tf               #   naming, valid Fargate CPU/memory table
 │   ├── network.tf              #   VPC, public subnets, IGW, security groups
 │   ├── alb.tf                  #   ALB, target group, listener
-│   ├── ecr.tf                  #   ECR repo + lifecycle policy
-│   ├── iam.tf                  #   task execution role + task role
+│   ├── iam.tf                  #   task execution role + task role (+ optional Docker Hub pull secret access)
 │   ├── ecs.tf                  #   cluster, task definition, service, log group
 │   ├── autoscaling.tf          #   target-tracking scaling (CPU + memory)
 │   ├── outputs.tf
@@ -77,19 +76,20 @@ docker compose up --build            # → http://localhost:8080
 # 2. Create the Terraform state bucket (once)
 cd terraform/bootstrap && terraform init && terraform apply -var="state_bucket_name=<unique-name>"
 
-# 3. Start Jenkins, add the "aws-deployer" credential, create a Pipeline-from-SCM job
+# 3. Set DOCKERHUB_REPO + TF_STATE_BUCKET in the Jenkinsfile
+# 4. Start Jenkins, add the "aws-deployer" and "dockerhub" credentials, create a Pipeline-from-SCM job
 cd jenkins && docker compose up -d --build   # → http://localhost:8081
 
-# 4. Build with Parameters → ACTION=deploy
+# 5. Build with Parameters → ACTION=deploy
 ```
 
-Full walkthrough: **[docs/SETUP.md](docs/SETUP.md)**.
+Step-by-step for Windows: **[RUN-GUIDE.md](RUN-GUIDE.md)**. Reference details: **[docs/SETUP.md](docs/SETUP.md)**.
 
 ## Pipeline actions
 
 | `ACTION` | What happens |
 |----------|--------------|
-| `deploy` | Test → build → push `<sha>-<build>` to ECR → plan → approve → apply → verify new version is live |
+| `deploy` | Test → build → push `<sha>-<build>` and `latest` to Docker Hub → plan → approve → apply → verify new version is live |
 | `plan-only` | Test + `terraform plan`, no changes |
 | `scale` | Keeps the current image; applies new `TASK_CPU`/`TASK_MEMORY` (new task def revision, rolling replace) and `MIN/MAX_TASKS`, then sets `DESIRED_COUNT` |
 | `destroy` | `terraform plan -destroy` → mandatory approval → apply |
@@ -104,7 +104,8 @@ Full walkthrough: **[docs/SETUP.md](docs/SETUP.md)**.
 
 ## Safety features
 
-- Immutable ECR tags, one per build: every deployment can be traced back to a commit.
+- Unique image tag per build (`<git-sha>-<build>`): every deployment can be traced back to a commit, and ECS always pulls an exact version rather than `latest`.
+- Docker Hub is logged into with an access token (never a password) and logged out after each push.
 - ECS deployment circuit breaker with automatic rollback.
 - Manual approval before apply, always required for destroy.
 - Tasks accept traffic only from the ALB security group, and the container runs as a non-root user.

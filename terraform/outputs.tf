@@ -3,9 +3,9 @@ output "alb_url" {
   value       = "http://${aws_lb.main.dns_name}"
 }
 
-output "ecr_repository_url" {
-  description = "ECR repository to push images to."
-  value       = aws_ecr_repository.app.repository_url
+output "image" {
+  description = "Docker Hub image currently deployed."
+  value       = "docker.io/${var.dockerhub_repository}:${var.image_tag}"
 }
 
 output "ecs_cluster_name" {
@@ -27,7 +27,7 @@ output "image_tag" {
 
 output "task_size" {
   description = "Current vertical scaling settings."
-  value       = {
+  value = {
     cpu              = var.task_cpu
     memory           = var.task_memory
     gunicorn_workers = local.gunicorn_workers

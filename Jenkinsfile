@@ -1,4 +1,4 @@
-// CI/CD pipeline: test -> build -> push to ECR -> terraform plan/apply -> verify on ECS Fargate.
+// CI/CD pipeline: test -> build -> push to Docker Hub -> terraform plan/apply -> verify on ECS Fargate.
 //
 // Actions:
 //   deploy     build a new image from this commit and roll it out (plus any infra / task-size changes)
@@ -8,6 +8,8 @@
 //
 // Required Jenkins setup (see docs/SETUP.md):
 //   - Credential "aws-deployer" of type "AWS Credentials" (AWS Credentials plugin)
+//   - Credential "dockerhub" of type "Username with password" (Docker Hub user + access token)
+//   - DOCKERHUB_REPO below set to <your-dockerhub-user>/ecs-demo
 //   - Agent with docker, terraform >= 1.10, aws cli v2, curl, git
 
 pipeline {
@@ -32,6 +34,8 @@ pipeline {
 
   environment {
     AWS_CREDS_ID       = 'aws-deployer'
+    DOCKERHUB_CREDS_ID = 'dockerhub'
+    DOCKERHUB_REPO     = 'CHANGE-ME/ecs-demo'           // <dockerhub-username>/<repository>
     AWS_REGION         = 'us-east-1'
     AWS_DEFAULT_REGION = 'us-east-1'
     PROJECT_NAME       = 'ecs-demo'
@@ -45,6 +49,9 @@ pipeline {
     TF_VAR_aws_region    = "${AWS_REGION}"
     TF_VAR_project_name  = "${PROJECT_NAME}"
     TF_VAR_environment   = "${DEPLOY_ENV}"
+    TF_VAR_dockerhub_repository = "${DOCKERHUB_REPO}"
+    // Private Docker Hub repo only (see docs/SETUP.md):
+    // TF_VAR_dockerhub_credentials_secret_arn = 'arn:aws:secretsmanager:us-east-1:<account-id>:secret:dockerhub-pull-XXXXXX'
     TF_VAR_task_cpu      = "${params.TASK_CPU}"
     TF_VAR_task_memory   = "${params.TASK_MEMORY}"
     TF_VAR_desired_count = "${params.DESIRED_COUNT}"
@@ -100,32 +107,24 @@ pipeline {
       }
     }
 
-    stage('Ensure ECR Repository') {
+    stage('Push to Docker Hub') {
       when { expression { params.ACTION == 'deploy' } }
       steps {
-        // Targeted apply so the repository exists before the first push.
-        // No-op on every run after the first.
-        withCredentials([aws(credentialsId: env.AWS_CREDS_ID)]) {
-          dir(env.TF_DIR) {
-            sh 'terraform apply -auto-approve -target=aws_ecr_repository.app -target=aws_ecr_lifecycle_policy.app'
-          }
-        }
-      }
-    }
-
-    stage('Push to ECR') {
-      when { expression { params.ACTION == 'deploy' } }
-      steps {
-        withCredentials([aws(credentialsId: env.AWS_CREDS_ID)]) {
+        withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS_ID,
+                                          usernameVariable: 'DOCKERHUB_USER',
+                                          passwordVariable: 'DOCKERHUB_TOKEN')]) {
+          // The repository is created automatically on first push (public by default).
           sh '''
-            REPO_URL=$(terraform -chdir="$TF_DIR" output -raw ecr_repository_url)
-            REGISTRY="${REPO_URL%%/*}"
-            aws ecr get-login-password --region "$AWS_REGION" \
-              | docker login --username AWS --password-stdin "$REGISTRY"
-            docker tag "$PROJECT_NAME:$IMAGE_TAG" "$REPO_URL:$IMAGE_TAG"
-            docker push "$REPO_URL:$IMAGE_TAG"
+            echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USER" --password-stdin
+            docker tag "$PROJECT_NAME:$IMAGE_TAG" "$DOCKERHUB_REPO:$IMAGE_TAG"
+            docker tag "$PROJECT_NAME:$IMAGE_TAG" "$DOCKERHUB_REPO:latest"
+            docker push "$DOCKERHUB_REPO:$IMAGE_TAG"
+            docker push "$DOCKERHUB_REPO:latest"
           '''
         }
+      }
+      post {
+        always { sh 'docker logout >/dev/null 2>&1 || true' }
       }
     }
 
