@@ -1,6 +1,6 @@
 # Deploying a Containerized Application Using IaC
 
-A Dockerized Python **calculator web app** deployed to **AWS ECS Fargate**, with infrastructure defined in **Terraform** and delivery automated by a **Jenkins** CI/CD pipeline. The pipeline supports vertical scaling (task CPU/memory) and horizontal scaling (task count and autoscaling) through ECS service updates.
+A Dockerized Python **calculator web app** deployed to **AWS ECS Fargate**, with infrastructure defined in **Terraform** and delivery automated by a **Jenkins** CI/CD pipeline. The pipeline supports vertical scaling (task CPU/memory) and horizontal scaling (task count) through ECS service updates.
 
 ## Architecture
 
@@ -22,20 +22,17 @@ flowchart LR
     p --> hub[(Docker Hub<br/>user/ecs-demo)]
     apply --> state[(S3 remote state<br/>+ lockfile)]
 
-    subgraph aws[AWS VPC · 2 AZs]
-        alb[Application Load Balancer<br/>:80] --> tg[Target group<br/>/health]
-        tg --> svc
+    subgraph aws[AWS VPC · 2 public subnets]
         subgraph ecs[ECS cluster]
-            svc[ECS service<br/>rolling deploy · circuit breaker] --> t1[Fargate task]
-            svc --> t2[Fargate task]
+            svc[ECS service<br/>desired_count · rolling deploy · circuit breaker] --> t1[Fargate task<br/>public IP :8080]
+            svc --> t2[Fargate task<br/>public IP :8080]
         end
-        asg[App Auto Scaling<br/>CPU target 60%] -.-> svc
     end
 
     apply --> aws
     hub -.image pull.-> t1 & t2
     t1 & t2 -.logs.-> cw[CloudWatch Logs<br/>Container Insights]
-    user[End user] --> alb
+    user[End user] -->|http://task-ip:8080| t1 & t2
 ```
 
 ## Repository layout
@@ -51,17 +48,15 @@ flowchart LR
 │   └── requirements*.txt
 ├── terraform/                  # Main infrastructure stack
 │   ├── provider.tf             #   Terraform + AWS provider, S3 backend, name prefix
-│   ├── variables.tf            #   all inputs incl. task_cpu/task_memory, min/max capacity
-│   ├── network.tf              #   VPC, public subnets, IGW, security groups
-│   ├── alb.tf                  #   ALB, target group, listener
+│   ├── variables.tf            #   all inputs incl. task_cpu, task_memory, desired_count
+│   ├── network.tf              #   VPC, 2 public subnets, internet gateway, security group
 │   ├── iam.tf                  #   execution role + task role
 │   ├── ecs.tf                  #   cluster, task definition, service, log group
-│   ├── autoscaling.tf          #   target-tracking scaling on CPU
 │   ├── outputs.tf
 │   └── bootstrap/              #   one-time S3 state bucket
 ├── Jenkinsfile                 # deploy | plan-only | scale | destroy
 ├── jenkins/                    # Jenkins controller image (docker, terraform, aws cli) + compose
-├── scripts/scale-service.sh    # manual desired-count update
+├── scripts/get-app-urls.sh     # print the public URL of each running task
 ├── docker-compose.yml          # run the app locally
 └── docs/
     ├── SETUP.md                # step-by-step setup guide
@@ -70,6 +65,18 @@ flowchart LR
     ├── TERRAFORM-GUIDE.md      # explanation of the Terraform structure and logic
     └── jenkins-iam-policy.json # IAM policy for the Jenkins deployer
 ```
+
+## Accessing the app
+
+There is no load balancer, so each task has its own public IP on port 8080. The IPs change whenever tasks are replaced (deploy, scale, crash). The Jenkins **Verify Deployment** stage prints the current URLs, or run:
+
+```bash
+scripts/get-app-urls.sh ecs-demo-dev-cluster ecs-demo-dev-svc
+# http://3.91.20.14:8080
+# http://54.166.7.201:8080
+```
+
+You can also find each task's **Public IP** in the ECS console under the service's **Tasks** tab.
 
 ## Quick start
 
@@ -96,7 +103,7 @@ Step-by-step for Windows: **[RUN-GUIDE.md](docs/RUN-GUIDE.md)**. Reference detai
 | GET | `/` | Calculator UI: buttons, keyboard input, last 10 results |
 | POST | `/api/calculate` | Body `{"expression": "(2 + 3) × 4 ^ 2"}` → `{"result": 80, ...}`; errors return `400 {"error": "Division by zero"}` |
 | GET | `/api/info` | Version, environment, task hostname (used by the pipeline smoke test) |
-| GET | `/health` | ALB and container health check |
+| GET | `/health` | ECS container health check |
 
 Supported: numbers, `+ − × ÷ %`, `^` (power), parentheses, unary minus. Expressions are parsed into an AST and only arithmetic nodes are evaluated, so arbitrary code is rejected. Length, exponent and result size are capped to keep requests cheap.
 
@@ -106,16 +113,15 @@ Supported: numbers, `+ − × ÷ %`, `^` (power), parentheses, unary minus. Expr
 |----------|--------------|
 | `deploy` | Test → build → push `<sha>-<build>` and `latest` to Docker Hub → plan → approve → apply → verify new version is live |
 | `plan-only` | Test + `terraform plan`, no changes |
-| `scale` | Keeps the current image; applies new `TASK_CPU`/`TASK_MEMORY` (new task def revision, rolling replace) and `MIN/MAX_TASKS`, then sets `DESIRED_COUNT` |
+| `scale` | Keeps the current image; applies new `TASK_CPU`/`TASK_MEMORY` (new task def revision, rolling replace) and `DESIRED_COUNT` (horizontal) |
 | `destroy` | `terraform plan -destroy` → mandatory approval → apply |
 
 ## Scaling model
 
 | Type | Where | How it changes |
 |------|-------|----------------|
-| Vertical | `aws_ecs_task_definition.app` (`task_cpu`, `task_memory`) | New revision → ECS rolling deployment, zero downtime. Gunicorn workers follow vCPU. |
-| Horizontal (auto) | `aws_appautoscaling_*` | Target tracking keeps average CPU near 60%, between min/max. |
-| Horizontal (manual) | `scripts/scale-service.sh` | `aws ecs update-service --desired-count N`. Terraform ignores `desired_count` after creation so deploys don't reset it. |
+| Vertical | `aws_ecs_task_definition.app` (`task_cpu`, `task_memory`) | New revision → ECS starts new tasks, then stops the old ones. The new tasks have new public IPs. |
+| Horizontal | `aws_ecs_service.app` (`desired_count`) | ECS starts or stops tasks to match the new count. |
 
 ## Safety features
 
@@ -123,5 +129,5 @@ Supported: numbers, `+ − × ÷ %`, `^` (power), parentheses, unary minus. Expr
 - Docker Hub is logged into with an access token (never a password) and logged out after each push.
 - ECS deployment circuit breaker with automatic rollback.
 - Manual approval before apply, always required for destroy.
-- Tasks accept traffic only from the ALB security group, and the container runs as a non-root user.
-- Terraform state is versioned and encrypted in S3, with lockfile-based locking.
+- The security group allows inbound traffic on the app port only, and the container runs as a non-root user.
+- Terraform state is versioned in S3, with lockfile-based locking.

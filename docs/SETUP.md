@@ -89,7 +89,7 @@ docker compose exec jenkins sh -c "docker version && terraform version && aws --
 
 ## 7. First deployment
 
-Build with Parameters → `ACTION=deploy` (defaults: 0.25 vCPU / 512 MiB, 2 tasks, autoscale 1–4).
+Build with Parameters → `ACTION=deploy` (defaults: 0.25 vCPU / 512 MiB, 2 tasks).
 
 Pipeline stages:
 
@@ -99,23 +99,25 @@ Pipeline stages:
 4. **Push to Docker Hub** – logs in with the `dockerhub` credential, pushes `<git-sha>-<build>` and `latest`.
 5. **Terraform Plan** – saved as `tfplan`, readable copy archived as `tfplan.txt`.
 6. **Approval** – manual gate (skip with `AUTO_APPROVE`, never skipped for destroy).
-7. **Terraform Apply** – creates/updates VPC, ALB, ECS cluster, task definition, service, IAM, autoscaling.
-8. **Verify Deployment** – waits for the service to be stable, then checks that `/api/info` on the ALB returns the new version.
+7. **Terraform Apply** – creates/updates VPC, subnets, security group, IAM roles, ECS cluster, task definition, service.
+8. **Verify Deployment** – waits for the service to be stable, finds each task's public IP (`scripts/get-app-urls.sh`), checks that `/api/info` on every task returns the new version, and prints the URLs.
 
-The app URL is printed in the console log and available with:
+The app URLs (`http://<task-public-ip>:8080`, one per task) are printed at the end of the console log. There is no load balancer, so these IPs **change on every deploy or scale**. Get the current ones any time with:
 
 ```bash
-cd terraform && terraform output alb_url
+scripts/get-app-urls.sh ecs-demo-dev-cluster ecs-demo-dev-svc
 ```
 
-The first apply takes ~5 minutes (mostly ALB provisioning).
+or in the ECS console: *Clusters → ecs-demo-dev-cluster → Services → ecs-demo-dev-svc → Tasks → (task) → Public IP*.
+
+The first apply takes ~2–3 minutes.
 
 ## 8. Scaling
 
 ### Vertical (task size)
 
 Run `ACTION=scale` (or `deploy`) with new `TASK_CPU` / `TASK_MEMORY`, e.g. `1024` / `2048`.
-Terraform registers a new task definition revision and ECS does a rolling replacement (min healthy 100%, max 200%) — no downtime.
+Terraform registers a new task definition revision and ECS replaces the tasks: new ones start first, then the old ones stop. The new tasks have new public IPs.
 
 Valid Fargate combinations:
 
@@ -131,9 +133,7 @@ Any other combination is rejected by AWS during `terraform apply` (the error nam
 
 ### Horizontal (task count)
 
-- **Automatic**: target tracking keeps average CPU near 60%, within `MIN_TASKS`–`MAX_TASKS`.
-- **Manual**: `ACTION=scale` with `DESIRED_COUNT` calls `scripts/scale-service.sh` (`aws ecs update-service --desired-count`). Keep it within the min/max range or autoscaling will pull it back.
-
+Run `ACTION=scale` (or `deploy`) with a new `DESIRED_COUNT`. Terraform updates `desired_count` on the ECS service, and ECS starts or stops tasks to match.
 ## 9. Running locally
 
 ```bash
@@ -157,10 +157,10 @@ To remove the state bucket too, empty it (including old versions), then run `ter
 
 Approximate us-east-1 cost with the defaults, running 24/7:
 
-- ALB: ~$16/month + LCU
 - Fargate: 2 × (0.25 vCPU, 0.5 GB) ≈ $18/month
 - CloudWatch Logs / Container Insights: small, usage-based
-- No NAT gateway (tasks use public IPs; only the ALB can reach them)
+- No load balancer or NAT gateway (tasks use public IPs directly)
+- Public IPv4 addresses: ~$3.60/month each
 
 Destroy the stack when you're not using it.
 
@@ -172,6 +172,7 @@ Destroy the stack when you're not using it.
 | Tasks stuck in `PENDING`, `CannotPullContainerError` | Image tag missing on Docker Hub, repo is private (it must be public), or tasks have no internet route (check `assign_public_ip` / subnet routes). |
 | `toomanyrequests: You have reached your pull rate limit` | Docker Hub's anonymous pull limit. Wait and retry; ECS keeps trying to start the tasks. |
 | Push fails: `denied: requested access to the resource is denied` | `DOCKERHUB_REPO` username doesn't match the `dockerhub` credential, or the token is read-only. |
+| Browser can't open `http://<ip>:8080` | The task was replaced and has a new IP; rerun `scripts/get-app-urls.sh`. Use `http://`, not `https://`. |
 | Deployment rolled back automatically | Circuit breaker fired: new tasks failed health checks. Check CloudWatch log group `/ecs/ecs-demo-dev`. |
 | `Error acquiring the state lock` | A previous run died mid-apply. Confirm no run is active, then `terraform force-unlock <LOCK_ID>`. |
 | `Invalid 'cpu' setting for task` / invalid memory on apply | Pick a CPU/memory combination from the table above. |

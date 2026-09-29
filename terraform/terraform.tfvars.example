@@ -3,11 +3,9 @@ aws_region           = "us-east-1"
 dockerhub_repository = "your-dockerhub-user/ecs-demo"
 image_tag            = "latest"
 
-# Vertical scaling
+# Vertical scaling (size of each task)
 task_cpu    = 256
 task_memory = 512
 
-# Horizontal scaling
+# Horizontal scaling (number of tasks)
 desired_count = 2
-min_capacity  = 1
-max_capacity  = 4

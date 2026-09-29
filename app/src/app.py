@@ -47,7 +47,7 @@ def info():
 
 @app.get("/health")
 def health():
-    # Used by the ALB target group and the ECS container health check.
+    # Used by the ECS container health check.
     return jsonify(status="ok"), 200
 
 

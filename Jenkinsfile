@@ -3,7 +3,7 @@
 // Actions:
 //   deploy     build a new image from this commit and roll it out (plus any infra / task-size changes)
 //   plan-only  run tests and show the Terraform plan, change nothing
-//   scale      keep the current image, apply new CPU/memory (vertical) and task counts (horizontal)
+//   scale      keep the current image, apply new CPU/memory (vertical) and task count (horizontal)
 //   destroy    tear everything down (always requires approval)
 //
 // Required Jenkins setup (see docs/SETUP.md):
@@ -26,9 +26,7 @@ pipeline {
     choice(name: 'ACTION', choices: ['deploy', 'plan-only', 'scale', 'destroy'], description: 'What this run should do')
     choice(name: 'TASK_CPU', choices: ['256', '512', '1024', '2048', '4096'], description: 'Vertical scaling: Fargate CPU units per task')
     string(name: 'TASK_MEMORY', defaultValue: '512', description: 'Vertical scaling: memory (MiB) per task, must match CPU (e.g. 256->512-2048, 512->1024-4096, 1024->2048-8192)')
-    string(name: 'DESIRED_COUNT', defaultValue: '2', description: 'Horizontal scaling: task count (applied on first deploy and by the scale action)')
-    string(name: 'MIN_TASKS', defaultValue: '1', description: 'Autoscaling minimum tasks')
-    string(name: 'MAX_TASKS', defaultValue: '4', description: 'Autoscaling maximum tasks')
+    string(name: 'DESIRED_COUNT', defaultValue: '2', description: 'Horizontal scaling: number of tasks to run')
     booleanParam(name: 'AUTO_APPROVE', defaultValue: false, description: 'Skip the manual approval before apply (never skipped for destroy)')
   }
 
@@ -53,8 +51,6 @@ pipeline {
     TF_VAR_task_cpu      = "${params.TASK_CPU}"
     TF_VAR_task_memory   = "${params.TASK_MEMORY}"
     TF_VAR_desired_count = "${params.DESIRED_COUNT}"
-    TF_VAR_min_capacity  = "${params.MIN_TASKS}"
-    TF_VAR_max_capacity  = "${params.MAX_TASKS}"
   }
 
   stages {
@@ -178,22 +174,6 @@ pipeline {
       }
     }
 
-    stage('Scale Task Count') {
-      when { expression { params.ACTION == 'scale' } }
-      steps {
-        // desired_count is ignored by Terraform after creation, so set it directly.
-        withCredentials([aws(credentialsId: env.AWS_CREDS_ID)]) {
-          sh '''
-            chmod +x scripts/scale-service.sh
-            scripts/scale-service.sh \
-              "$(terraform -chdir="$TF_DIR" output -raw ecs_cluster_name)" \
-              "$(terraform -chdir="$TF_DIR" output -raw ecs_service_name)" \
-              "$DESIRED_COUNT"
-          '''
-        }
-      }
-    }
-
     stage('Verify Deployment') {
       when { expression { params.ACTION in ['deploy', 'scale'] } }
       steps {
@@ -201,25 +181,34 @@ pipeline {
           sh '''
             CLUSTER=$(terraform -chdir="$TF_DIR" output -raw ecs_cluster_name)
             SERVICE=$(terraform -chdir="$TF_DIR" output -raw ecs_service_name)
-            URL=$(terraform -chdir="$TF_DIR" output -raw alb_url)
 
             echo "Waiting for $SERVICE to reach a steady state..."
             aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
 
-            echo "Smoke testing $URL"
-            for i in $(seq 1 20); do
-              if INFO=$(curl -fsS --max-time 5 "$URL/api/info"); then
-                echo "$INFO"
-                if echo "$INFO" | grep -q "\\"$TF_VAR_image_tag\\""; then
-                  echo "Version $TF_VAR_image_tag is live at $URL"
-                  exit 0
+            # No load balancer: check every task on its own public IP.
+            chmod +x scripts/get-app-urls.sh
+            URLS=$(scripts/get-app-urls.sh "$CLUSTER" "$SERVICE")
+
+            for URL in $URLS; do
+              echo "Smoke testing $URL"
+              OK=false
+              for i in $(seq 1 10); do
+                if curl -fsS --max-time 5 "$URL/api/info" | grep -q "\\"$TF_VAR_image_tag\\""; then
+                  OK=true
+                  break
                 fi
+                echo "  attempt $i: not ready yet, retrying in 10s"
+                sleep 10
+              done
+              if [ "$OK" != true ]; then
+                echo "Smoke test failed for $URL"
+                exit 1
               fi
-              echo "Attempt $i: not ready yet, retrying in 10s"
-              sleep 10
+              echo "  version $TF_VAR_image_tag is live"
             done
-            echo "Smoke test failed"
-            exit 1
+
+            echo "App URLs:"
+            echo "$URLS"
           '''
         }
       }

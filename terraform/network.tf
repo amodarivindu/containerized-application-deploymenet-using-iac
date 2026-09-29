@@ -1,6 +1,6 @@
 # VPC with two public subnets in two AZs.
-# Tasks get public IPs so they can pull the image from Docker Hub (no NAT gateway needed).
-# They are still protected: the task security group only accepts traffic from the ALB.
+# Each task gets a public IP: users open http://<task-ip>:8080, and the task can
+# pull the image from Docker Hub.
 
 resource "aws_vpc" "main" {
   cidr_block           = "10.20.0.0/16"
@@ -48,38 +48,17 @@ resource "aws_route_table_association" "public_b" {
   route_table_id = aws_route_table.public.id
 }
 
-# ---------- Security groups (firewalls) ----------
-
-# Load balancer: open to the internet on port 80.
-resource "aws_security_group" "alb" {
-  name   = "${local.name}-alb-sg"
-  vpc_id = aws_vpc.main.id
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# Tasks: accept the app port ONLY from the load balancer's security group.
+# ---------- Security group (firewall) for the tasks ----------
+# Inbound: only the app port. Outbound: everything (Docker Hub, CloudWatch Logs).
 resource "aws_security_group" "tasks" {
   name   = "${local.name}-tasks-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {
-    from_port       = var.container_port
-    to_port         = var.container_port
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
+    from_port   = var.container_port
+    to_port     = var.container_port
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {

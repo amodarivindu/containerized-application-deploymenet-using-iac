@@ -53,23 +53,7 @@ variable "task_memory" {
 
 # ---------- Horizontal scaling: number of tasks ----------
 variable "desired_count" {
-  description = "Tasks to start with (afterwards autoscaling / Jenkins 'scale' controls it)"
+  description = "Number of tasks to run"
   type        = number
   default     = 2
-}
-
-variable "min_capacity" {
-  type    = number
-  default = 1
-}
-
-variable "max_capacity" {
-  type    = number
-  default = 4
-}
-
-variable "cpu_target" {
-  description = "Autoscaling keeps average CPU around this percentage"
-  type        = number
-  default     = 60
 }

@@ -58,7 +58,7 @@ It uses **Flask**, a small Python web framework. Each `@app.get` or `@app.post` 
 | `GET /` | `index()` | The calculator page (HTML) | The user's browser |
 | `POST /api/calculate` | `calculate()` | JSON result or error | The page's JavaScript |
 | `GET /api/info` | `info()` | Version, environment, hostname | Jenkins smoke test |
-| `GET /health` | `health()` | `{"status":"ok"}` | AWS load balancer and ECS health checks |
+| `GET /health` | `health()` | `{"status":"ok"}` | ECS container health check |
 
 ### Configuration from environment variables
 
@@ -97,11 +97,11 @@ POST /api/calculate   {"expression": "1 / 0"}
 
 ### Why the hostname?
 
-`socket.gethostname()` returns the container's ID. In AWS, every ECS task has a different one, so the page shows which of your 2+ tasks answered. Refresh a few times and it changes, which shows the load balancer at work.
+`socket.gethostname()` returns the container's ID. In AWS, every ECS task has a different one, so the page shows which task answered. Each task has its own public IP, so opening each task's URL shows a different hostname.
 
 ### Why `/health` must stay simple
 
-The load balancer calls `/health` every 15 seconds. If it fails, AWS decides the container is broken, stops sending it traffic, and replaces it. It should never depend on anything that could be slow or fail.
+ECS calls `/health` inside the container every 30 seconds (the `healthCheck` in `terraform/ecs.tf`). If it fails 3 times in a row, ECS decides the container is broken and replaces it. It should never depend on anything that could be slow or fail.
 
 ---
 

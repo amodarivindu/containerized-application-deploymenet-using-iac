@@ -236,29 +236,37 @@ For a **private** GitHub repo, also add **Username with password** with ID `gith
    | Push to Docker Hub | Logs in with the `dockerhub` credential, pushes `<tag>` and `latest` |
    | Terraform Plan | Plans the changes and archives `tfplan.txt` |
    | Approval | Waits for you to click **Apply** |
-   | Terraform Apply | Creates VPC, ALB, ECS cluster, task definition, service, IAM, autoscaling |
-   | Verify Deployment | Waits for the service to be stable and checks the new version is live |
+   | Terraform Apply | Creates VPC, subnets, security group, IAM roles, ECS cluster, task definition, service |
+   | Verify Deployment | Waits for the service to be stable, finds each task's public IP, checks the new version is live on every task, prints the URLs |
 
 4. At **Approval**, optionally open **Build Artifacts → tfplan.txt** to review, then click **Apply**.
-5. The first deploy takes about 5–8 minutes. The console ends with:
+5. The first deploy takes about 3–5 minutes. The console ends with one URL per task:
 
    ```
-   Version abc1234-2 is live at http://ecs-demo-dev-alb-xxxx.us-east-1.elb.amazonaws.com
+   App URLs:
+   http://3.91.20.14:8080
+   http://54.166.7.201:8080
    ```
 
-Open that URL. Refresh a few times: **Served by task** changes because two tasks share the traffic.
+Open either URL. There is **no load balancer**, so each URL is one specific task: the footer's **Served by task** is different on each.
+
+> These IPs **change on every deploy or scale**, because new tasks get new IPs. Always use the latest URLs.
+
 On Docker Hub, **Repositories → ecs-demo → Tags** now shows the new tag and `latest`.
 
-To see the URL again later:
+To find the current URLs later, use any of these:
 
-```powershell
-cd terraform
-Copy-Item backend.hcl.example backend.hcl   # then edit the bucket name
-terraform init -backend-config=backend.hcl
-terraform output alb_url
-terraform output image
-cd ..
-```
+- **AWS Console:** ECS → Clusters → `ecs-demo-dev-cluster` → Services → `ecs-demo-dev-svc` → **Tasks** → click a task → **Public IP**. Open `http://<Public IP>:8080`.
+- **Git Bash:**
+  ```bash
+  bash scripts/get-app-urls.sh ecs-demo-dev-cluster ecs-demo-dev-svc
+  ```
+- **PowerShell:**
+  ```powershell
+  $tasks = aws ecs list-tasks --cluster ecs-demo-dev-cluster --service-name ecs-demo-dev-svc --query "taskArns" --output text
+  $enis  = aws ecs describe-tasks --cluster ecs-demo-dev-cluster --tasks $tasks.Split() --query "tasks[].attachments[].details[?name=='networkInterfaceId'].value" --output text
+  aws ec2 describe-network-interfaces --network-interface-ids $enis.Split() --query "NetworkInterfaces[].Association.PublicIp" --output text
+  ```
 
 ---
 
@@ -268,8 +276,8 @@ All scaling runs through **Build with Parameters**.
 
 | Demo | Parameters | What you'll see |
 |------|-----------|-----------------|
-| **Vertical** (bigger tasks) | `ACTION=scale`, `TASK_CPU=512`, `TASK_MEMORY=1024` | New task definition revision; tasks are replaced one by one with no downtime |
-| **Horizontal** (more tasks) | `ACTION=scale`, `DESIRED_COUNT=3`, `MAX_TASKS=5` | Service grows to 3 running tasks |
+| **Vertical** (bigger tasks) | `ACTION=scale`, `TASK_CPU=512`, `TASK_MEMORY=1024` | New task definition revision; new tasks start, then the old ones stop (new IPs) |
+| **Horizontal** (more tasks) | `ACTION=scale`, `DESIRED_COUNT=3` | Service grows to 3 running tasks, and 3 URLs are printed |
 | **New release** | Change the `<h1>Calculator</h1>` title in `app/src/templates/index.html`, commit, push, then `ACTION=deploy` | New tag on Docker Hub, new version on the page |
 | **Dry run** | `ACTION=plan-only` | Tests and plan only, no changes |
 
@@ -290,7 +298,7 @@ Container logs: **CloudWatch → Log groups → /ecs/ecs-demo-dev**.
 
 ## Step 10 — Tear down
 
-The stack costs roughly **$1 per day** while running.
+The stack costs roughly **$0.80 per day** while running (2 small Fargate tasks plus their public IPs).
 
 1. Jenkins → **Build with Parameters** → `ACTION = destroy` → approve.
 2. Stop Jenkins locally:
@@ -321,6 +329,7 @@ The S3 state bucket is kept (it costs almost nothing). To delete it too, empty t
 | `terraform fmt -check` fails in Jenkins | Run `terraform fmt -recursive` in the `terraform` folder, then commit and push. |
 | `NoSuchBucket` / `AccessDenied` on init | `TF_STATE_BUCKET` in the Jenkinsfile doesn't match your bucket, or the IAM policy still has `CHANGE-ME`. |
 | Apply fails with an invalid CPU / memory error | Use a pair from the table in Step 9. |
+| Browser can't open `http://<ip>:8080` | The task was replaced and has a new IP; get the current URLs (Step 8). Use `http://`, not `https://`. |
 | Deployment rolled back automatically | New tasks failed health checks. Check logs in CloudWatch `/ecs/ecs-demo-dev`. |
 | `Error acquiring the state lock` | A previous run stopped mid-apply. Make sure nothing is running, then `terraform force-unlock <LOCK_ID>`. |
 | Scale fails with `output "image_tag" not found` | Nothing is deployed yet. Run `ACTION=deploy` first. |

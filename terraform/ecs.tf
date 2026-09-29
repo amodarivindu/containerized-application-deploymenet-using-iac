@@ -36,6 +36,14 @@ resource "aws_ecs_task_definition" "app" {
         { name = "ENVIRONMENT", value = var.environment },
       ]
 
+      # ECS calls /health inside the container; a task that fails is replaced.
+      healthCheck = {
+        command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${var.container_port}/health', timeout=3)\" || exit 1"]
+        interval    = 30
+        retries     = 3
+        startPeriod = 15
+      }
+
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -48,14 +56,13 @@ resource "aws_ecs_task_definition" "app" {
   ])
 }
 
-# ---------- Service: keeps the tasks running behind the load balancer ----------
+# ---------- Service: keeps desired_count tasks running ----------
 resource "aws_ecs_service" "app" {
-  name                              = "${local.name}-svc"
-  cluster                           = aws_ecs_cluster.main.id
-  task_definition                   = aws_ecs_task_definition.app.arn
-  desired_count                     = var.desired_count
-  launch_type                       = "FARGATE"
-  health_check_grace_period_seconds = 60
+  name            = "${local.name}-svc"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.app.arn
+  desired_count   = var.desired_count # horizontal scaling
+  launch_type     = "FARGATE"
 
   # If a new version fails its health checks, roll back to the previous one.
   deployment_circuit_breaker {
@@ -67,19 +74,5 @@ resource "aws_ecs_service" "app" {
     subnets          = [aws_subnet.public_a.id, aws_subnet.public_b.id]
     security_groups  = [aws_security_group.tasks.id]
     assign_public_ip = true
-  }
-
-  load_balancer {
-    target_group_arn = aws_lb_target_group.app.arn
-    container_name   = "app"
-    container_port   = var.container_port
-  }
-
-  # The listener must exist before the service can register tasks with the ALB.
-  depends_on = [aws_lb_listener.http]
-
-  # After the first apply, autoscaling and the Jenkins "scale" action own the task count.
-  lifecycle {
-    ignore_changes = [desired_count]
   }
 }

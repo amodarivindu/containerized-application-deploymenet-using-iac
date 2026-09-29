@@ -15,12 +15,6 @@
       "Effect": "Allow",
       "Action": [
         "ecs:*",
-        "elasticloadbalancing:*",
-        "application-autoscaling:*",
-        "cloudwatch:DescribeAlarms",
-        "cloudwatch:PutMetricAlarm",
-        "cloudwatch:DeleteAlarms",
-        "cloudwatch:ListTagsForResource",
         "logs:*"
       ],
       "Resource": "*"
@@ -62,11 +56,7 @@
       "Resource": "*",
       "Condition": {
         "StringEquals": {
-          "iam:AWSServiceName": [
-            "ecs.amazonaws.com",
-            "elasticloadbalancing.amazonaws.com",
-            "ecs.application-autoscaling.amazonaws.com"
-          ]
+          "iam:AWSServiceName": "ecs.amazonaws.com"
         }
       }
     }
