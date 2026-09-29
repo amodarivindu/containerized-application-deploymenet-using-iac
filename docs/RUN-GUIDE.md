@@ -1,6 +1,6 @@
 # Run Guide (Windows)
 
-Step-by-step instructions to run this project on Windows, from a local test to a live deployment on AWS ECS Fargate through Jenkins.
+
 Images are stored on **Docker Hub**. Jenkins pushes them and ECS pulls them.
 Run all commands in **PowerShell** from the project folder unless a step says otherwise.
 
