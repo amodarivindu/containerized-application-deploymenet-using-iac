@@ -23,7 +23,7 @@ cd "D:\my\Projects\containerized application deploymenet using iac"
 | 4 | Create the Terraform state bucket | Yes |
 | 5 | Create the IAM user for Jenkins | Yes |
 | 6 | Push the code to GitHub | No |
-| 7 | Start and configure Jenkins | No |
+| 7 | Prepare your Jenkins (tools, plugins, credentials, job) | No |
 | 8 | Deploy to AWS from Jenkins | Yes |
 | 9 | Demo scaling | Yes |
 | 10 | Tear down | Yes |
@@ -176,28 +176,54 @@ git push -u origin main
 
 ---
 
-## Step 7 — Start and configure Jenkins
+## Step 7 — Prepare your Jenkins
 
-### 7.1 Start Jenkins
+This guide assumes Jenkins is **already installed and running** on your machine. You only need to check it has what this pipeline needs, then add two credentials and one job.
 
-```powershell
-cd jenkins
-docker compose up -d --build     # first build takes ~5 minutes
-docker compose exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
-cd ..
+### 7.1 Tools on the Jenkins machine
+
+The pipeline runs `sh` steps that call these commands, so they must be on the `PATH` of the user Jenkins runs as:
+
+| Tool | Check | Used for |
+|------|-------|----------|
+| Docker (with buildx) | `docker version` (must show a Server) | Tests, image build, push |
+| Terraform >= 1.10 | `terraform version` | Infrastructure |
+| AWS CLI v2 | `aws --version` | Wait for deploy, find task IPs |
+| Git, curl, bash | `git --version`, `curl --version` | Checkout, smoke test, scripts |
+
+> **Jenkins running directly on Windows (not in Docker)?** `sh` steps need a Unix shell. Install Git for Windows, then either add `C:\Program Files\Git\bin` to the system `PATH`, or set **Manage Jenkins → System → Shell executable** to `C:\Program Files\Git\bin\sh.exe`. Restart Jenkins afterwards.
+>
+> **Jenkins running in a Docker container?** The container needs the Docker CLI, the host's `/var/run/docker.sock` mounted, and Terraform and the AWS CLI installed inside it.
+
+The quickest way to check all of this is a throwaway pipeline job (**New Item → Pipeline**) with this script:
+
+```groovy
+pipeline {
+  agent any
+  stages {
+    stage('Check tools') {
+      steps { sh 'docker version && terraform version && aws --version && git --version && curl --version' }
+    }
+  }
+}
 ```
 
-1. Open **http://localhost:8081** and paste the password.
-2. Choose **Install suggested plugins**.
-3. Create your admin user.
+If it goes green, Jenkins is ready. You can delete the job afterwards.
 
-Check that Jenkins can use Docker, Terraform and the AWS CLI:
+### 7.2 Plugins
 
-```powershell
-docker exec jenkins sh -c "docker ps && terraform version && aws --version"
-```
+**Manage Jenkins → Plugins → Available plugins.** Install any of these that are missing:
 
-### 7.2 Add the credentials
+| Plugin | Why |
+|--------|-----|
+| Pipeline | Runs the `Jenkinsfile` |
+| Git | Checks out the repo |
+| Credentials Binding | `withCredentials` in the pipeline |
+| **AWS Credentials** | The `aws-deployer` credential type (usually not installed by default) |
+| Timestamper | `timestamps()` in the console log |
+| Pipeline: Stage View *(optional)* | The stage overview on the job page |
+
+### 7.3 Add the credentials
 
 **Manage Jenkins → Credentials → System → Global credentials → Add Credentials**. Add both of these, and use the IDs exactly as shown:
 
@@ -208,7 +234,7 @@ docker exec jenkins sh -c "docker ps && terraform version && aws --version"
 
 For a **private** GitHub repo, also add **Username with password** with ID `github`, your GitHub username and a personal access token.
 
-### 7.3 Create the pipeline job
+### 7.4 Create the pipeline job
 
 1. **New Item** → name `ecs-demo` → **Pipeline** → OK.
 2. In the **Pipeline** section:
@@ -301,15 +327,7 @@ Container logs: **CloudWatch → Log groups → /ecs/ecs-demo-dev**.
 The stack costs roughly **$0.80 per day** while running (2 small Fargate tasks plus their public IPs).
 
 1. Jenkins → **Build with Parameters** → `ACTION = destroy` → approve.
-2. Stop Jenkins locally:
-
-   ```powershell
-   cd jenkins
-   docker compose down        # add -v to also delete Jenkins data
-   cd ..
-   ```
-
-3. *(Optional)* Delete the image repository on Docker Hub: **Repositories → ecs-demo → Settings → Delete repository**.
+2. *(Optional)* Delete the image repository on Docker Hub: **Repositories → ecs-demo → Settings → Delete repository**.
 
 The S3 state bucket is kept (it costs almost nothing). To delete it too, empty the bucket (including old versions), then run `terraform destroy -var="bucket_name=<name>"` in `terraform\bootstrap`.
 
@@ -321,7 +339,10 @@ The S3 state bucket is kept (it costs almost nothing). To delete it too, empty t
 |---------|-----|
 | `failed to connect to the docker API ... docker_engine` | Docker Desktop is not running. Start it and wait for *Engine running*. |
 | `aws` / `terraform` not recognized | Open a new terminal after installing, or reinstall with `winget`. |
-| Jenkins: `permission denied ... docker.sock` | Restart Jenkins: `cd jenkins; docker compose down; docker compose up -d`. On Linux hosts, set `DOCKER_GID` (see docs/SETUP.md). |
+| Jenkins: `sh: not found` or `Cannot run program "sh"` | Jenkins runs on Windows without a Unix shell. See the note in Step 7.1. |
+| Jenkins: `docker: not found` / `terraform: not found` | The tool isn't on the PATH of the Jenkins service. Add it, then restart Jenkins. |
+| Jenkins: `permission denied ... docker.sock` | The Jenkins user can't use Docker. On Linux: `sudo usermod -aG docker jenkins`, then restart Jenkins. |
+| Jenkins: `No such DSL method 'aws'` or no **AWS Credentials** kind | Install the **AWS Credentials** plugin (Step 7.2). |
 | Jenkins: `Could not find credentials entry with ID 'aws-deployer'` or `'dockerhub'` | The IDs must match exactly. `aws-deployer` must be of kind **AWS Credentials**, and `dockerhub` of kind **Username with password**. |
 | Push: `denied: requested access to the resource is denied` | The username in `DOCKERHUB_REPO` doesn't match the `dockerhub` credential, or the token is not **Read & Write**. |
 | Tasks stuck, `CannotPullContainerError` | The tag isn't on Docker Hub, or the repo is private (it must be public). |

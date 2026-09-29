@@ -54,21 +54,13 @@ Then put that bucket name in:
 - `Jenkinsfile` → `TF_STATE_BUCKET`
 - `terraform/backend.hcl` (copy from `backend.hcl.example`) for local runs
 
-## 6. Run Jenkins
+## 6. Prepare your existing Jenkins
 
-```bash
-cd jenkins
-docker compose up -d --build
-docker compose exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
-```
+This project uses a Jenkins you already run; it doesn't set one up.
 
-Open http://localhost:8081, paste the password, choose **Install suggested plugins** (the required ones are already baked into the image from `plugins.txt`) and create an admin user.
+**Tools** on the Jenkins machine (on the `PATH` of the Jenkins user): Docker with buildx, Terraform >= 1.10, AWS CLI v2, git, curl, and a Unix shell for `sh` steps. On Windows, set *Manage Jenkins → System → Shell executable* to `C:\Program Files\Git\bin\sh.exe`.
 
-Verify the tools inside the container:
-
-```bash
-docker compose exec jenkins sh -c "docker version && terraform version && aws --version"
-```
+**Plugins:** Pipeline, Git, Credentials Binding, **AWS Credentials**, Timestamper (Pipeline: Stage View optional).
 
 ### Add credentials
 
@@ -168,7 +160,8 @@ Destroy the stack when you're not using it.
 
 | Symptom | Likely cause / fix |
 |---------|-------------------|
-| `permission denied ... docker.sock` in Jenkins | Wrong group for the socket. On Linux: `DOCKER_GID=$(stat -c '%g' /var/run/docker.sock) docker compose up -d` |
+| `permission denied ... docker.sock` in Jenkins | The Jenkins user can't use Docker. On Linux: `sudo usermod -aG docker jenkins`, then restart Jenkins. |
+| `sh: not found` in Jenkins on Windows | Set the Shell executable to Git's `sh.exe` (section 6). |
 | Tasks stuck in `PENDING`, `CannotPullContainerError` | Image tag missing on Docker Hub, repo is private (it must be public), or tasks have no internet route (check `assign_public_ip` / subnet routes). |
 | `toomanyrequests: You have reached your pull rate limit` | Docker Hub's anonymous pull limit. Wait and retry; ECS keeps trying to start the tasks. |
 | Push fails: `denied: requested access to the resource is denied` | `DOCKERHUB_REPO` username doesn't match the `dockerhub` credential, or the token is read-only. |

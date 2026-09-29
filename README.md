@@ -55,7 +55,6 @@ flowchart LR
 │   ├── outputs.tf
 │   └── bootstrap/              #   one-time S3 state bucket
 ├── Jenkinsfile                 # deploy | plan-only | scale | destroy
-├── jenkins/                    # Jenkins controller image (docker, terraform, aws cli) + compose
 ├── scripts/get-app-urls.sh     # print the public URL of each running task
 ├── docker-compose.yml          # run the app locally
 └── docs/
@@ -88,8 +87,8 @@ docker compose up --build            # → http://localhost:8080
 cd terraform/bootstrap && terraform init && terraform apply -var="bucket_name=<unique-name>"
 
 # 3. Set DOCKERHUB_REPO + TF_STATE_BUCKET in the Jenkinsfile
-# 4. Start Jenkins, add the "aws-deployer" and "dockerhub" credentials, create a Pipeline-from-SCM job
-cd jenkins && docker compose up -d --build   # → http://localhost:8081
+# 4. In your existing Jenkins: install the AWS Credentials plugin, add the "aws-deployer"
+#    and "dockerhub" credentials, create a Pipeline-from-SCM job
 
 # 5. Build with Parameters → ACTION=deploy
 ```

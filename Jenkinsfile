@@ -10,7 +10,8 @@
 //   - Credential "aws-deployer" of type "AWS Credentials" (AWS Credentials plugin)
 //   - Credential "dockerhub" of type "Username with password" (Docker Hub user + access token)
 //   - DOCKERHUB_REPO below set to <your-dockerhub-user>/ecs-demo
-//   - Agent with docker, terraform >= 1.10, aws cli v2, curl, git
+//   - Plugins: Pipeline, Git, Credentials Binding, AWS Credentials, Timestamper
+//   - Agent with docker, terraform >= 1.10, aws cli v2, curl, git and a Unix shell for sh steps
 
 pipeline {
   agent any
