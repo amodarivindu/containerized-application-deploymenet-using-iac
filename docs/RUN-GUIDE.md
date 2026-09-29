@@ -193,6 +193,12 @@ The pipeline runs `sh` steps that call these commands, so they must be on the `P
 
 > **Jenkins running directly on Windows (not in Docker)?** `sh` steps need a Unix shell. Install Git for Windows, then either add `C:\Program Files\Git\bin` to the system `PATH`, or set **Manage Jenkins → System → Shell executable** to `C:\Program Files\Git\bin\sh.exe`. Restart Jenkins afterwards.
 >
+> **Jenkins installed as a Windows service and no administrator rights?** The service runs as LocalSystem, so it can't see Git's `sh` or use your Docker Desktop, and fixing that needs admin. Instead, run a **Jenkins agent as your own user**:
+> 1. *Manage Jenkins → Nodes → New Node* → name `local`, **Permanent Agent** → Remote root directory `C:\Users\<you>\jenkins-agent`, Usage **Use this node as much as possible**, Launch method **Launch agent by connecting it to the controller** → Save.
+> 2. *Manage Jenkins → Nodes → Built-In Node → Configure* → **Number of executors: 0**, so every build goes to the agent.
+> 3. Open the `local` node page and copy the **secret** from the command shown there.
+> 4. Start Docker Desktop, then run: `powershell -ExecutionPolicy Bypass -File .\scripts\start-jenkins-agent.ps1 -Secret <secret>`. Keep that window open while builds run.
+>
 > **Jenkins running in a Docker container?** The container needs the Docker CLI, the host's `/var/run/docker.sock` mounted, and Terraform and the AWS CLI installed inside it.
 
 The quickest way to check all of this is a throwaway pipeline job (**New Item → Pipeline**) with this script:
