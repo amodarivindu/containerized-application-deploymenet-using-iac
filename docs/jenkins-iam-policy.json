@@ -6,8 +6,8 @@
       "Effect": "Allow",
       "Action": ["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
       "Resource": [
-        "arn:aws:s3:::CHANGE-ME-ecs-demo-tfstate",
-        "arn:aws:s3:::CHANGE-ME-ecs-demo-tfstate/*"
+        "arn:aws:s3:::ecs-demo-tfstate-400493233228",
+        "arn:aws:s3:::ecs-demo-tfstate-400493233228/*"
       ]
     },
     {

@@ -40,7 +40,7 @@ pipeline {
     PROJECT_NAME       = 'ecs-demo'
     DEPLOY_ENV         = 'dev'
     TF_DIR             = 'terraform'
-    TF_STATE_BUCKET    = 'ecs-demo-tfstate'   // bucket created by terraform/bootstrap
+    TF_STATE_BUCKET    = 'ecs-demo-tfstate-400493233228'   // bucket created by terraform/bootstrap
     TF_IN_AUTOMATION   = 'true'
     TF_INPUT           = '0'
 
