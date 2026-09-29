@@ -34,13 +34,13 @@ pipeline {
   environment {
     AWS_CREDS_ID       = 'aws-deployer'
     DOCKERHUB_CREDS_ID = 'dockerhub'
-    DOCKERHUB_REPO     = 'CHANGE-ME/ecs-demo'           // <dockerhub-username>/<repository>
+    DOCKERHUB_REPO     = 'amodarivindu/ecs-demo'           // <dockerhub-username>/<repository>
     AWS_REGION         = 'us-east-1'
     AWS_DEFAULT_REGION = 'us-east-1'
     PROJECT_NAME       = 'ecs-demo'
     DEPLOY_ENV         = 'dev'
     TF_DIR             = 'terraform'
-    TF_STATE_BUCKET    = 'CHANGE-ME-ecs-demo-tfstate'   // bucket created by terraform/bootstrap
+    TF_STATE_BUCKET    = 'ecs-demo-tfstate'   // bucket created by terraform/bootstrap
     TF_IN_AUTOMATION   = 'true'
     TF_INPUT           = '0'
 
